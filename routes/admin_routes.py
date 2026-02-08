@@ -19,13 +19,12 @@ from extensions import db
 from werkzeug.security import generate_password_hash
 from datetime import datetime
 import pandas as pd
+from utils.file_handler import get_backup_path
 
 
 
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
-BACKUP_FOLDER = r"C:\Users\yogan\Desktop\projectbackup"
-os.makedirs(BACKUP_FOLDER, exist_ok=True)
 
 
 # ... (Keep dashboard and create-user routes exactly as they were) ...
@@ -150,12 +149,9 @@ def manage_users():
 @role_required("admin")
 def backup_data():
     try:
-        # 1. Configuration: Save to your projectbackup folder
-        BACKUP_DIR = r"C:\Users\yogan\Desktop\projectbackup"
+        # 1. Configuration: Save to backup folder
+        BACKUP_DIR = get_backup_path()
         
-        if not os.path.exists(BACKUP_DIR):
-            os.makedirs(BACKUP_DIR)
-
         # 2. Generate unique filename
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         filename = f"Backup_{timestamp}.xlsx"
@@ -413,12 +409,8 @@ def generate_report():
 def upload_backup():
     try:
         # --- UPDATE THIS LINE TO YOUR PREFERRED FOLDER ---
-        BACKUP_DIR = r"C:\Users\yogan\Desktop\projectbackup" 
+        BACKUP_DIR = get_backup_path()
         
-        # Ensure directory exists
-        if not os.path.exists(BACKUP_DIR):
-            os.makedirs(BACKUP_DIR)
-
         if 'file' not in request.files:
             return jsonify({"status": "error", "message": "No file part"}), 400
             

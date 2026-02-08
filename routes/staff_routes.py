@@ -10,6 +10,7 @@ import os
 from sqlalchemy import text, func
 from io import BytesIO
 from datetime import datetime
+from utils.file_handler import save_file
 
 staff_bp = Blueprint("staff", __name__)
 
@@ -571,29 +572,19 @@ def upload_cie_paper():
     else:
         final_name = f"{semester}_{safe_subject}.pdf"
 
-    # --- 1. DEFINE BASE PATH ---
-    # Using raw string for Windows path compatibility
-    base_path = r"C:\Users\yogan\Desktop\projectbackup"
+    # --- 1. USE CENTRALIZED FILE SAVE ---
+    # This will save to: project_root/uploads/cie_papers/semester_X/filename.pdf
+    subfolder = f"cie_papers/semester_{semester}"
     
-    # --- 2. CONSTRUCT FULL PATH ---
-    # Result: C:\Users\yogan\Desktop\projectbackup\static\uploads\cie_papers\semester_X
-    upload_dir = os.path.join(base_path, "static", "uploads", "cie_papers", f"semester_{semester}")
-    
-    os.makedirs(upload_dir, exist_ok=True)
-    
-    # This is the full absolute path including filename
-    file_path = os.path.join(upload_dir, final_name)
-
-    # --- 3. SAVE FILE TO THAT PATH ---
-    file.save(file_path)
-
     try:
+        # save_file returns the absolute path
+        file_path = save_file(file, subfolder=subfolder, filename=final_name)
+
         paper = CIEPapers(
             staff_id=current_user.user_id,
             branch_id=current_user.branch_id,
             semester=semester,
             # --- 4. INSERT ABSOLUTE PATH INTO DB ---
-            # We use 'file_path' here instead of a relative string
             file_path=file_path, 
             subject_code=subject_code,
             is_displayed=0
