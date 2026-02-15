@@ -7,7 +7,7 @@ from models.attendance import Attendance
 from models.cie_marks import CIEMarks
 import re
 import os
-from sqlalchemy import text, func
+from sqlalchemy import text, func, or_
 from io import BytesIO
 from datetime import datetime
 from utils.file_handler import save_file
@@ -123,7 +123,9 @@ def extract_semester_from_class(class_name):
         "vii": 7,
         "viii": 8
     }
-    roman_match = re.search(r"\b(i{1,3}|iv|v|vi|vii|viii)\b", class_name, re.IGNORECASE)
+    roman_match = re.search(r"""
+(i{1,3}|iv|v|vi|vii|viii)
+""", class_name, re.IGNORECASE)
     if roman_match:
         return roman_map.get(roman_match.group(1).lower())
 
@@ -260,7 +262,10 @@ def build_staff_report(allocation):
         is_active=True
     )
     if allocation.batch_id:
-        q = q.filter_by(batch_id=allocation.batch_id)
+        q = q.filter(or_(
+            Student.batch_id == allocation.batch_id,
+            Student.batch_id.is_(None)
+        ))
 
     students = q.order_by(Student.register_no.asc()).all()
     if not students:
@@ -331,11 +336,13 @@ def staff_allocation_students():
 
     q = Student.query.filter_by(
         class_id=allocation.class_id,
-        branch_id=current_user.branch_id,
         is_active=True
     )
     if allocation.batch_id:
-        q = q.filter_by(batch_id=allocation.batch_id)
+        q = q.filter(or_(
+            Student.batch_id == allocation.batch_id,
+            Student.batch_id.is_(None)
+        ))
 
     students = q.order_by(Student.register_no.asc()).all()
 

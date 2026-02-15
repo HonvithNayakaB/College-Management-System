@@ -90,6 +90,94 @@ def create_user():
             )
 
     return render_template("create_user.html", roles=Role.query.all(), branches=Branch.query.all())
+
+@admin_bp.route("/get-users")
+@role_required("admin")
+def get_users():
+    users = db.session.query(User, Role, Branch).join(Role).outerjoin(Branch).all()
+    users_data = []
+    for user, role, branch in users:
+        users_data.append({
+            "id": user.user_id,
+            "username": user.username,
+            "role_id": user.role_id,
+            "role_name": role.role_name,
+            "branch_id": user.branch_id,
+            "branch_name": branch.branch_name if branch else "N/A",
+            "is_active": user.is_active
+        })
+    return jsonify(users_data)
+
+@admin_bp.route("/update-user/<int:user_id>", methods=["POST"])
+@role_required("admin")
+def update_user(user_id):
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"status": "error", "message": "User not found."}), 404
+
+    data = request.json
+    new_username = data.get("username")
+    new_role_id = data.get("role_id")
+    new_branch_id = data.get("branch_id")
+    new_password = data.get("password")
+
+    # Validate new_username
+    if new_username and new_username != user.username:
+        if User.query.filter_by(username=new_username).first():
+            return jsonify({"status": "error", "message": "Username already exists."}), 400
+        user.username = new_username
+
+    # Validate new_role_id
+    if new_role_id:
+        role = Role.query.get(new_role_id)
+        if not role:
+            return jsonify({"status": "error", "message": "Role not found."}), 400
+        
+        # HOD specific validation (only one HOD per branch)
+        if role.role_name.lower() == "hod" and user.role.role_name.lower() != "hod": # If changing to HOD
+            existing_hod = User.query.filter_by(branch_id=new_branch_id, role_id=new_role_id, is_active=True).first()
+            if existing_hod and existing_hod.user_id != user_id:
+                return jsonify({"status": "error", "message": f"An HOD already exists for branch {existing_hod.branch.branch_name}."}), 400
+        
+        user.role_id = new_role_id
+
+    # Validate new_branch_id
+    if new_branch_id:
+        branch = Branch.query.get(new_branch_id)
+        if not branch:
+            return jsonify({"status": "error", "message": "Branch not found."}), 400
+        
+        # HOD specific validation (only one HOD per branch) if branch is also changing
+        if user.role.role_name.lower() == "hod" and new_branch_id != user.branch_id: # If HOD and branch is changing
+             existing_hod = User.query.filter_by(branch_id=new_branch_id, role_id=user.role_id, is_active=True).first()
+             if existing_hod and existing_hod.user_id != user_id:
+                 return jsonify({"status": "error", "message": f"An HOD already exists for branch {branch.branch_name}."}), 400
+
+        user.branch_id = new_branch_id
+
+    # Update password if provided
+    if new_password:
+        user.password_hash = generate_password_hash(new_password)
+
+    try:
+        db.session.commit()
+        return jsonify({"status": "success", "message": "User updated successfully."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@admin_bp.route("/get-roles")
+@role_required("admin")
+def get_roles():
+    roles = Role.query.all()
+    return jsonify([{"id": r.role_id, "name": r.role_name} for r in roles])
+
+@admin_bp.route("/get-branches")
+@role_required("admin")
+def get_branches():
+    branches = Branch.query.all()
+    return jsonify([{"id": b.branch_id, "name": b.branch_name} for b in branches])
+
 # =========================================================
 # 1. SET MAINTENANCE (With debug prints)
 # =========================================================

@@ -1,6 +1,8 @@
 from flask import Blueprint, request, render_template, redirect, url_for, session
 from flask_login import login_user, logout_user
 from services.auth_service import authenticate_user
+from extensions import db  # NEW: Import db
+from models.user import User # NEW: Import User
 
 # --- NEW IMPORT: For Maintenance Check ---
 from models.maintain import MaintenanceMode 
@@ -73,3 +75,12 @@ def logout():
     logout_user()      # Tell Flask-Login to wipe the user session
     session.clear()    # Wipe any manual session data you stored
     return redirect(url_for("auth.login"))
+
+# NEW: Temporary DB test route
+@auth_bp.route("/test-db")
+def test_db():
+    try:
+        user_count = db.session.query(User).count()
+        return f"Database connection successful! Number of users: {user_count}"
+    except Exception as e:
+        return f"Database connection failed: {e}", 500
