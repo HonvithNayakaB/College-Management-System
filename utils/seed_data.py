@@ -51,3 +51,9 @@ def seed_branches():
 def run_seed():
     seed_roles()
     seed_branches()
+
+if __name__ == '__main__':
+    from app import create_app
+    app = create_app()
+    with app.app_context():
+        run_seed()

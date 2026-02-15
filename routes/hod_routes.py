@@ -52,7 +52,9 @@ def extract_semester_from_class_name(class_name):
         "vii": 7,
         "viii": 8
     }
-    roman_match = re.search(r"\b(i{1,3}|iv|v|vi|vii|viii)\b", class_name, re.IGNORECASE)
+    roman_match = re.search(r"""
+(i{1,3}|iv|v|vi|vii|viii)
+""", class_name, re.IGNORECASE)
     if roman_match:
         return roman_map.get(roman_match.group(1).lower())
     return None
@@ -235,6 +237,8 @@ def add_student():
     reg_no = (data.get("register_no") or "").strip()
     name = (data.get("name") or "").strip()
     sem_val = data.get("semester")
+    
+    print(f"Adding student with reg_no: {reg_no}, name: {name}, sem_val: {sem_val}")
 
     if not reg_no or not name or not sem_val:
         return jsonify({"error": "Register Number, Name, and Semester are required."}), 400
@@ -243,11 +247,15 @@ def add_student():
         return jsonify({"error": f"Register Number {reg_no} already exists!"}), 400
 
     sem_numeric = parse_semester_value(sem_val)
+    print(f"Parsed semester value: {sem_numeric}")
+
     if not sem_numeric:
         return jsonify({"error": f"Invalid semester value: {sem_val}"}), 400
 
     target_class = None
     name_a = semester_class_name(sem_numeric)
+    print(f"Semester class name: {name_a}")
+
     if name_a:
         target_class = Class.query.filter_by(
             branch_id=current_user.branch_id,
@@ -256,6 +264,8 @@ def add_student():
 
     if not target_class:
         target_class = find_class_for_semester(current_user.branch_id, sem_numeric)
+
+    print(f"Target class found: {target_class}")
 
     if not target_class:
         return jsonify({"error": f"Could not find a Class for Semester {sem_val}."}), 400
@@ -511,6 +521,85 @@ def add_course():
         db.session.rollback()
         return jsonify({"error": f"Database Error: {str(e)}"}), 500
 
+
+@hod_bp.route("/courses")
+@login_required
+def list_courses():
+    unauthorized = hod_only()
+    if unauthorized:
+        return unauthorized
+
+    courses = Subject.query.filter_by(branch_id=current_user.branch_id).order_by(Subject.semester).all()
+    
+    return jsonify([
+        {
+            "id": course.subject_id,
+            "name": course.subject_name,
+            "code": course.subject_code,
+            "syllabus": course.syllabus_name,
+            "semester": course.semester
+        } for course in courses
+    ])
+
+@hod_bp.route("/update-course/<int:course_id>", methods=["POST"])
+@login_required
+def update_course(course_id):
+    unauthorized = hod_only()
+    if unauthorized:
+        return unauthorized
+
+    course = Subject.query.get(course_id)
+    if not course or course.branch_id != current_user.branch_id:
+        return jsonify({"error": "Course not found or unauthorized"}), 404
+
+    data = request.json or {}
+    name = (data.get("name") or "").strip()
+    code = (data.get("code") or "").strip()
+    syllabus = (data.get("syllabus") or "").strip()
+    semester = data.get("semester")
+
+    if not all([name, code, syllabus, semester]):
+        return jsonify({"error": "All fields are required"}), 400
+
+    # Check if code is already taken by another course
+    existing_course = Subject.query.filter(Subject.subject_id != course_id, Subject.subject_code == code, Subject.branch_id == current_user.branch_id).first()
+    if existing_course:
+        return jsonify({"error": f"Course code '{code}' already exists."}), 400
+
+    try:
+        course.subject_name = name
+        course.subject_code = code
+        course.syllabus_name = syllabus
+        course.semester = int(semester)
+        db.session.commit()
+        return jsonify({"status": "success", "message": "Course updated successfully"})
+    except ValueError:
+        return jsonify({"error": "Semester must be a valid number."}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@hod_bp.route("/delete-course/<int:course_id>", methods=["DELETE"])
+@login_required
+def delete_course(course_id):
+    unauthorized = hod_only()
+    if unauthorized:
+        return unauthorized
+
+    course = Subject.query.get(course_id)
+    if not course or course.branch_id != current_user.branch_id:
+        return jsonify({"error": "Course not found or unauthorized"}), 404
+        
+    try:
+        db.session.delete(course)
+        db.session.commit()
+        return jsonify({"status": "success", "message": "Course deleted successfully"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
 # =========================================================
 # STAFF ALLOCATION
 # =========================================================
@@ -647,6 +736,69 @@ def create_allocation():
     db.session.commit()
 
     return jsonify({"status": "success"})
+
+
+@hod_bp.route("/delete-allocation/<int:allocation_id>", methods=["DELETE"])
+@login_required
+def delete_allocation(allocation_id):
+    unauthorized = hod_only()
+    if unauthorized:
+        return unauthorized
+
+    alloc = StaffAllocation.query.get(allocation_id)
+
+    if not alloc:
+        return jsonify({"error": "Allocation not found"}), 404
+
+    # Ensure the HOD can only delete allocations in their branch
+    if alloc.staff.branch_id != current_user.branch_id:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        db.session.delete(alloc)
+        db.session.commit()
+        return jsonify({"status": "success", "message": "Allocation deleted"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+@hod_bp.route("/update-allocation", methods=["POST"])
+@login_required
+def update_allocation():
+    unauthorized = hod_only()
+    if unauthorized:
+        return unauthorized
+
+    data = request.json or {}
+    allocations_to_update = data.get("allocations", [])
+
+    if not allocations_to_update:
+        return jsonify({"error": "No allocations provided to update."}), 400
+
+    try:
+        for alloc_data in allocations_to_update:
+            alloc_id = alloc_data.get("id")
+            new_staff_username = alloc_data.get("staff")
+
+            allocation = StaffAllocation.query.get(alloc_id)
+            if not allocation:
+                continue
+
+            # Basic authorization
+            if allocation.staff.branch_id != current_user.branch_id:
+                continue
+
+            # Find the new staff member
+            new_staff = User.query.filter_by(username=new_staff_username, branch_id=current_user.branch_id).first()
+            if new_staff:
+                allocation.staff_id = new_staff.user_id
+
+        db.session.commit()
+        return jsonify({"status": "success", "message": "Allocations updated successfully"})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 @hod_bp.route("/get-subjects-by-sem")
 @login_required
